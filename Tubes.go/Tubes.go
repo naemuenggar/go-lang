@@ -127,7 +127,11 @@ func Regist(regist *TabRegist, n *int) {
 // hash = SHA-256(salt + password). Stdlib only, tanpa dependency eksternal.
 func encodePassword(password string) string {
 	salt := make([]byte, 16)
-	_, _ = rand.Read(salt)
+	if _, err := rand.Read(salt); err != nil {
+		// crypto/rand wajib tersedia untuk jaminan keamanan password.
+		// Lebih baik panic daripada lanjut dengan salt yang tidak ter-randomize.
+		panic("crypto/rand unavailable: " + err.Error())
+	}
 	saltHex := hex.EncodeToString(salt)
 	return saltHex + ":" + hashPassword(password, saltHex)
 }
@@ -138,12 +142,33 @@ func hashPassword(password, saltHex string) string {
 }
 
 func verifyPassword(stored, password string) bool {
-	parts := strings.SplitN(stored, ":", 2)
-	if len(parts) != 2 {
-		// Format legacy plaintext (sebelum hashing diaktifkan). Bandingkan langsung.
+	if !isHashedFormat(stored) {
+		// Bukan format hashed yang valid (kemungkinan legacy plaintext). Bandingkan langsung.
 		return stored == password
 	}
+	parts := strings.SplitN(stored, ":", 2)
 	return parts[1] == hashPassword(password, parts[0])
+}
+
+// Format hashed: 32 hex char salt + ':' + 64 hex char sha256. Total tepat 97 char.
+func isHashedFormat(s string) bool {
+	if len(s) != 32+1+64 {
+		return false
+	}
+	if s[32] != ':' {
+		return false
+	}
+	return isHexLower(s[:32]) && isHexLower(s[33:])
+}
+
+func isHexLower(s string) bool {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return false
+		}
+	}
+	return true
 }
 
 func Login(regist *TabRegist, n int) (string, bool) {
@@ -1012,8 +1037,10 @@ func LoadUsers(regist *TabRegist) int {
 			continue
 		}
 		stored := parts[2]
-		// Auto-migrate baris legacy plaintext (tanpa pemisah salt:hash) ke format hashed.
-		if !strings.Contains(stored, ":") {
+		// Auto-migrate baris legacy plaintext ke format hashed.
+		// Validasi structural penuh (panjang + hex) supaya plaintext yang kebetulan
+		// mengandung ':' (mis. "abc:def") tetap di-migrasi, bukan disangka hashed.
+		if !isHashedFormat(stored) {
 			stored = encodePassword(stored)
 			migrated = true
 		}
