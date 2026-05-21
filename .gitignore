@@ -1,7 +1,8 @@
 # Build outputs
-/Tubes.go/Tubes
-/Tubes.go/tubes_test
+**/Tubes
+**/tubes_test
 *.exe
 
-# Runtime data (TSV persistence)
-/Tubes.go/data/
+# Runtime data (TSV persistence) — cover berbagai working directory
+**/data/
+/data/
