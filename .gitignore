@@ -1,0 +1,7 @@
+# Build outputs
+/Tubes.go/Tubes
+/Tubes.go/tubes_test
+*.exe
+
+# Runtime data (TSV persistence)
+/Tubes.go/data/
