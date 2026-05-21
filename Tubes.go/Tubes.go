@@ -2,6 +2,9 @@ package main
 
 import (
 	"bufio"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"strconv"
@@ -112,12 +115,60 @@ func Regist(regist *TabRegist, n *int) {
 		fmt.Scan(&confirm)
 	}
 
-	regist[*n] = registration{username, email, password, confirm}
+	regist[*n] = registration{username, email, encodePassword(password), ""}
 	*n++
 	SaveUsers(regist, *n)
 
 	fmt.Println("---------------------------------")
 	fmt.Println("   Akun", username, "berhasil dibuat   ")
+}
+
+// Password disimpan sebagai "salt:hash" hex. Salt random 16 byte per user,
+// hash = SHA-256(salt + password). Stdlib only, tanpa dependency eksternal.
+func encodePassword(password string) string {
+	salt := make([]byte, 16)
+	if _, err := rand.Read(salt); err != nil {
+		// crypto/rand wajib tersedia untuk jaminan keamanan password.
+		// Lebih baik panic daripada lanjut dengan salt yang tidak ter-randomize.
+		panic("crypto/rand unavailable: " + err.Error())
+	}
+	saltHex := hex.EncodeToString(salt)
+	return saltHex + ":" + hashPassword(password, saltHex)
+}
+
+func hashPassword(password, saltHex string) string {
+	sum := sha256.Sum256([]byte(saltHex + password))
+	return hex.EncodeToString(sum[:])
+}
+
+func verifyPassword(stored, password string) bool {
+	if !isHashedFormat(stored) {
+		// Bukan format hashed yang valid (kemungkinan legacy plaintext). Bandingkan langsung.
+		return stored == password
+	}
+	parts := strings.SplitN(stored, ":", 2)
+	return parts[1] == hashPassword(password, parts[0])
+}
+
+// Format hashed: 32 hex char salt + ':' + 64 hex char sha256. Total tepat 97 char.
+func isHashedFormat(s string) bool {
+	if len(s) != 32+1+64 {
+		return false
+	}
+	if s[32] != ':' {
+		return false
+	}
+	return isHexLower(s[:32]) && isHexLower(s[33:])
+}
+
+func isHexLower(s string) bool {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return false
+		}
+	}
+	return true
 }
 
 func Login(regist *TabRegist, n int) (string, bool) {
@@ -136,7 +187,7 @@ func Login(regist *TabRegist, n int) (string, bool) {
 		fmt.Scan(&password)
 
 		idx := CariIndexUser(regist, n, username)
-		if idx != -1 && regist[idx].password == password {
+		if idx != -1 && verifyPassword(regist[idx].password, password) {
 			fmt.Println("---------------------------------")
 			fmt.Print("  Halo ", username)
 			fmt.Println(", Selamat Datang   ")
@@ -961,9 +1012,14 @@ func SaveUsers(regist *TabRegist, n int) {
 	defer f.Close()
 	w := bufio.NewWriter(f)
 	for i := 0; i < n; i++ {
-		fmt.Fprintf(w, "%s\t%s\t%s\n", regist[i].username, regist[i].email, regist[i].password)
+		if _, err := fmt.Fprintf(w, "%s\t%s\t%s\n", regist[i].username, regist[i].email, regist[i].password); err != nil {
+			fmt.Println("Gagal tulis users:", err)
+			return
+		}
 	}
-	w.Flush()
+	if err := w.Flush(); err != nil {
+		fmt.Println("Gagal flush users:", err)
+	}
 }
 
 func LoadUsers(regist *TabRegist) int {
@@ -974,18 +1030,31 @@ func LoadUsers(regist *TabRegist) int {
 	defer f.Close()
 	s := bufio.NewScanner(f)
 	n := 0
+	migrated := false
 	for s.Scan() && n < NMAX {
 		parts := strings.Split(s.Text(), "\t")
 		if len(parts) < 3 {
 			continue
 		}
+		stored := parts[2]
+		// Auto-migrate baris legacy plaintext ke format hashed.
+		// Validasi structural penuh (panjang + hex) supaya plaintext yang kebetulan
+		// mengandung ':' (mis. "abc:def") tetap di-migrasi, bukan disangka hashed.
+		if !isHashedFormat(stored) {
+			stored = encodePassword(stored)
+			migrated = true
+		}
 		regist[n] = registration{
 			username:    parts[0],
 			email:       parts[1],
-			password:    parts[2],
-			confirmPass: parts[2],
+			password:    stored,
+			confirmPass: "",
 		}
 		n++
+	}
+	if migrated {
+		fmt.Println("Info: users.txt versi lama terdeteksi, password di-migrasi ke format hashed.")
+		SaveUsers(regist, n)
 	}
 	return n
 }
@@ -1000,9 +1069,14 @@ func SaveBarang(barang *TabBarang, n int) {
 	defer f.Close()
 	w := bufio.NewWriter(f)
 	for i := 0; i < n; i++ {
-		fmt.Fprintf(w, "%s\t%d\n", barang[i].sparePart, barang[i].harga)
+		if _, err := fmt.Fprintf(w, "%s\t%d\n", barang[i].sparePart, barang[i].harga); err != nil {
+			fmt.Println("Gagal tulis barang:", err)
+			return
+		}
 	}
-	w.Flush()
+	if err := w.Flush(); err != nil {
+		fmt.Println("Gagal flush barang:", err)
+	}
 }
 
 func LoadBarang(barang *TabBarang) int {
@@ -1039,9 +1113,14 @@ func SavePengguna(pengguna *TabPengguna, n int) {
 	defer f.Close()
 	w := bufio.NewWriter(f)
 	for i := 0; i < n; i++ {
-		fmt.Fprintf(w, "%s\t%s\n", pengguna[i].idPengguna, pengguna[i].nama)
+		if _, err := fmt.Fprintf(w, "%s\t%s\n", pengguna[i].idPengguna, pengguna[i].nama); err != nil {
+			fmt.Println("Gagal tulis pelanggan:", err)
+			return
+		}
 	}
-	w.Flush()
+	if err := w.Flush(); err != nil {
+		fmt.Println("Gagal flush pelanggan:", err)
+	}
 }
 
 func LoadPengguna(pengguna *TabPengguna) int {
@@ -1074,14 +1153,19 @@ func SaveTransaksi(transaksi *TabTransaksi, n int) {
 	defer f.Close()
 	w := bufio.NewWriter(f)
 	for i := 0; i < n; i++ {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%d\n",
+		if _, err := fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%d\n",
 			transaksi[i].idTransaksi,
 			transaksi[i].idPelanggan,
 			transaksi[i].namaBarang,
 			transaksi[i].jumlah,
-			transaksi[i].total)
+			transaksi[i].total); err != nil {
+			fmt.Println("Gagal tulis transaksi:", err)
+			return
+		}
 	}
-	w.Flush()
+	if err := w.Flush(); err != nil {
+		fmt.Println("Gagal flush transaksi:", err)
+	}
 }
 
 func LoadTransaksi(transaksi *TabTransaksi) int {
