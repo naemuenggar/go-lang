@@ -1,8 +1,15 @@
 package main
 
-import "fmt"
+import (
+	"bufio"
+	"fmt"
+	"os"
+	"strconv"
+	"strings"
+)
 
 const NMAX int = 100
+const DATA_DIR = "data"
 
 type registration struct {
 	username, email, password, confirmPass string
@@ -35,24 +42,34 @@ func main() {
 	var barang TabBarang
 	var pengguna TabPengguna
 	var transaksi TabTransaksi
-	var nBarang, nPengguna, nTransaksi int
+	var nUser, nBarang, nPengguna, nTransaksi int
 	var pilih int
 
-	for pilih != 2 {
+	// Load data dari disk supaya state persist antar sesi
+	nUser = LoadUsers(&regist)
+	nBarang = LoadBarang(&barang)
+	nPengguna = LoadPengguna(&pengguna)
+	nTransaksi = LoadTransaksi(&transaksi)
+
+	for pilih != 3 {
 		fmt.Println("---------------------------------")
 		fmt.Println("    Aplikasi Service Motor X    ")
 		fmt.Println("---------------------------------")
+		fmt.Println("Pengguna terdaftar:", nUser)
 		fmt.Println("1. Registrasi")
-		fmt.Println("2. Keluar")
+		fmt.Println("2. Login")
+		fmt.Println("3. Keluar")
 		fmt.Print("Pilihan: ")
 		fmt.Scan(&pilih)
 
 		if pilih == 1 {
-			Regist(&regist, 0)
-			if Login(&regist, 0) {
-				MenuUtama(&barang, &nBarang, &pengguna, &nPengguna, &transaksi, &nTransaksi)
-			}
+			Regist(&regist, &nUser)
 		} else if pilih == 2 {
+			username, ok := Login(&regist, nUser)
+			if ok {
+				MenuUtama(username, &barang, &nBarang, &pengguna, &nPengguna, &transaksi, &nTransaksi)
+			}
+		} else if pilih == 3 {
 			fmt.Println("Terimakasih")
 		} else {
 			fmt.Println("Pilihan Tidak Valid")
@@ -60,34 +77,57 @@ func main() {
 	}
 }
 
-func Regist(regist *TabRegist, n int) {
+// =========================================================
+// REGISTRASI & LOGIN (MULTI-USER)
+// =========================================================
+func Regist(regist *TabRegist, n *int) {
+	if *n >= NMAX {
+		fmt.Println("Slot registrasi penuh.")
+		return
+	}
+	var username, email, password, confirm string
+
 	fmt.Println("---------------------------------")
 	fmt.Println("Silahkan melakukan registrasi")
 	fmt.Print("Username: ")
-	fmt.Scan(&regist[n].username)
-	fmt.Print("Email: ")
-	fmt.Scan(&regist[n].email)
-	fmt.Print("Password: ")
-	fmt.Scan(&regist[n].password)
-	fmt.Print("Konfirmasi Password: ")
-	fmt.Scan(&regist[n].confirmPass)
+	fmt.Scan(&username)
 
-	for regist[n].confirmPass != regist[n].password {
-		fmt.Println("---------------------------------")
+	if CariIndexUser(regist, *n, username) != -1 {
+		fmt.Println("Username", username, "sudah terdaftar. Silahkan login.")
+		return
+	}
+
+	fmt.Print("Email: ")
+	fmt.Scan(&email)
+	fmt.Print("Password: ")
+	fmt.Scan(&password)
+	fmt.Print("Konfirmasi Password: ")
+	fmt.Scan(&confirm)
+
+	for confirm != password {
 		fmt.Println("Konfirmasi Password Tidak Valid")
 		fmt.Print("Password: ")
-		fmt.Scan(&regist[n].password)
+		fmt.Scan(&password)
 		fmt.Print("Konfirmasi Password: ")
-		fmt.Scan(&regist[n].confirmPass)
+		fmt.Scan(&confirm)
 	}
+
+	regist[*n] = registration{username, email, password, confirm}
+	*n++
+	SaveUsers(regist, *n)
+
 	fmt.Println("---------------------------------")
-	fmt.Println("   Akun anda berhasil dibuat   ")
+	fmt.Println("   Akun", username, "berhasil dibuat   ")
 }
 
-func Login(regist *TabRegist, n int) bool {
-	var username, password string
+func Login(regist *TabRegist, n int) (string, bool) {
+	if n == 0 {
+		fmt.Println("Belum ada user terdaftar. Silahkan registrasi dulu.")
+		return "", false
+	}
 
-	for username != regist[n].username || password != regist[n].password {
+	for percobaan := 0; percobaan < 3; percobaan++ {
+		var username, password string
 		fmt.Println("---------------------------------")
 		fmt.Println("Silahkan Login")
 		fmt.Print("Username: ")
@@ -95,27 +135,44 @@ func Login(regist *TabRegist, n int) bool {
 		fmt.Print("Password: ")
 		fmt.Scan(&password)
 
-		if username == regist[n].username && password == regist[n].password {
+		idx := CariIndexUser(regist, n, username)
+		if idx != -1 && regist[idx].password == password {
 			fmt.Println("---------------------------------")
 			fmt.Print("  Halo ", username)
 			fmt.Println(", Selamat Datang   ")
 			fmt.Println("---------------------------------")
-			return true
+			return username, true
 		}
-		fmt.Println("Username atau password anda salah")
+		fmt.Println("Username atau password anda salah (percobaan", percobaan+1, "dari 3)")
 	}
-	return false
+	fmt.Println("Login dibatalkan, terlalu banyak percobaan salah.")
+	return "", false
 }
 
-func MenuUtama(barang *TabBarang, nBarang *int, pengguna *TabPengguna, nPengguna *int, transaksi *TabTransaksi, nTransaksi *int) {
+func CariIndexUser(regist *TabRegist, n int, username string) int {
+	for i := 0; i < n; i++ {
+		if regist[i].username == username {
+			return i
+		}
+	}
+	return -1
+}
+
+// =========================================================
+// MENU UTAMA
+// =========================================================
+func MenuUtama(username string, barang *TabBarang, nBarang *int, pengguna *TabPengguna, nPengguna *int, transaksi *TabTransaksi, nTransaksi *int) {
 	var opsiPilihan int
 
-	for opsiPilihan != 4 {
+	for opsiPilihan != 5 {
 		fmt.Println("---------------------------------")
-		fmt.Println("1. Data Spare Part")
-		fmt.Println("2. Data Pelanggan")
-		fmt.Println("3. Data Transaksi")
-		fmt.Println("4. Keluar")
+		fmt.Println("    Menu Utama -", username)
+		fmt.Println("---------------------------------")
+		fmt.Println("1. Data Spare Part   (", *nBarang, ")")
+		fmt.Println("2. Data Pelanggan    (", *nPengguna, ")")
+		fmt.Println("3. Data Transaksi    (", *nTransaksi, ")")
+		fmt.Println("4. Laporan Transaksi")
+		fmt.Println("5. Logout")
 		fmt.Println("---------------------------------")
 		fmt.Print("Pilihan: ")
 		fmt.Scan(&opsiPilihan)
@@ -127,7 +184,9 @@ func MenuUtama(barang *TabBarang, nBarang *int, pengguna *TabPengguna, nPengguna
 		} else if opsiPilihan == 3 {
 			MenuTransaksi(transaksi, nTransaksi, barang, *nBarang, pengguna, *nPengguna)
 		} else if opsiPilihan == 4 {
-			fmt.Println("Terimakasih telah menggunakan aplikasi")
+			MenuLaporan(barang, *nBarang, pengguna, *nPengguna, transaksi, *nTransaksi)
+		} else if opsiPilihan == 5 {
+			fmt.Println("Logout. Sampai jumpa,", username)
 		} else {
 			fmt.Println("Pilihan Tidak Valid")
 		}
@@ -188,6 +247,7 @@ func TambahBarang(barang *TabBarang, n *int) {
 	barang[*n].sparePart = namaBarang
 	barang[*n].harga = hargaBarang
 	*n++
+	SaveBarang(barang, *n)
 
 	fmt.Println("Anda menambahkan", namaBarang, "dengan harga Rp", hargaBarang)
 	TampilBarang(barang, *n)
@@ -215,6 +275,7 @@ func HapusBarang(barang *TabBarang, n *int) {
 		barang[i] = barang[i+1]
 	}
 	*n--
+	SaveBarang(barang, *n)
 	fmt.Println("Data", dihapus.sparePart, "dengan harga Rp", dihapus.harga, "berhasil dihapus.")
 	TampilBarang(barang, *n)
 }
@@ -244,6 +305,7 @@ func EditBarang(barang *TabBarang, n int) {
 
 	barang[editIdx-1].sparePart = namaBarang
 	barang[editIdx-1].harga = hargaBarang
+	SaveBarang(barang, n)
 
 	fmt.Println("Data berhasil diedit")
 	TampilBarang(barang, n)
@@ -288,6 +350,7 @@ func UrutkanBarang(barang *TabBarang, n int) {
 			barang[i], barang[idxMin] = barang[idxMin], barang[i]
 		}
 	}
+	SaveBarang(barang, n)
 	fmt.Println("Data diurutkan berdasarkan harga (ascending).")
 	TampilBarang(barang, n)
 }
@@ -349,12 +412,19 @@ func TambahPengguna(pengguna *TabPengguna, n *int) {
 	var id, nama string
 	fmt.Print("ID Pelanggan:   ")
 	fmt.Scan(&id)
+
+	if CariIndexPengguna(pengguna, *n, id) != -1 {
+		fmt.Println("ID Pelanggan", id, "sudah terdaftar.")
+		return
+	}
+
 	fmt.Print("Nama Pelanggan: ")
 	fmt.Scan(&nama)
 
 	pengguna[*n].idPengguna = id
 	pengguna[*n].nama = nama
 	*n++
+	SavePengguna(pengguna, *n)
 
 	fmt.Println("Anda menambahkan pelanggan", id, "-", nama)
 	TampilPengguna(pengguna, *n)
@@ -382,6 +452,7 @@ func HapusPengguna(pengguna *TabPengguna, n *int) {
 		pengguna[i] = pengguna[i+1]
 	}
 	*n--
+	SavePengguna(pengguna, *n)
 	fmt.Println("Data pelanggan", dihapus.idPengguna, "-", dihapus.nama, "berhasil dihapus.")
 	TampilPengguna(pengguna, *n)
 }
@@ -410,6 +481,7 @@ func EditPengguna(pengguna *TabPengguna, n int) {
 
 	pengguna[editIdx-1].idPengguna = id
 	pengguna[editIdx-1].nama = nama
+	SavePengguna(pengguna, n)
 
 	fmt.Println("Data pelanggan berhasil diedit")
 	TampilPengguna(pengguna, n)
@@ -453,6 +525,7 @@ func UrutkanPengguna(pengguna *TabPengguna, n int) {
 			pengguna[i], pengguna[idxMin] = pengguna[idxMin], pengguna[i]
 		}
 	}
+	SavePengguna(pengguna, n)
 	fmt.Println("Data diurutkan berdasarkan nama (A-Z).")
 	TampilPengguna(pengguna, n)
 }
@@ -557,6 +630,7 @@ func TambahTransaksi(transaksi *TabTransaksi, n *int, barang *TabBarang, nBarang
 	transaksi[*n].jumlah = jumlah
 	transaksi[*n].total = total
 	*n++
+	SaveTransaksi(transaksi, *n)
 
 	fmt.Println("Transaksi", idTrans, "berhasil dicatat. Total: Rp", total)
 	TampilTransaksi(transaksi, *n)
@@ -584,6 +658,7 @@ func HapusTransaksi(transaksi *TabTransaksi, n *int) {
 		transaksi[i] = transaksi[i+1]
 	}
 	*n--
+	SaveTransaksi(transaksi, *n)
 	fmt.Println("Transaksi", dihapus.idTransaksi, "berhasil dihapus.")
 	TampilTransaksi(transaksi, *n)
 }
@@ -624,6 +699,7 @@ func EditTransaksi(transaksi *TabTransaksi, n int, barang *TabBarang, nBarang in
 	transaksi[editIdx-1].namaBarang = nama
 	transaksi[editIdx-1].jumlah = jumlah
 	transaksi[editIdx-1].total = barang[idxBarang].harga * jumlah
+	SaveTransaksi(transaksi, n)
 
 	fmt.Println("Transaksi berhasil diedit.")
 	TampilTransaksi(transaksi, n)
@@ -669,6 +745,7 @@ func UrutkanTransaksi(transaksi *TabTransaksi, n int) {
 			transaksi[i], transaksi[idxMax] = transaksi[idxMax], transaksi[i]
 		}
 	}
+	SaveTransaksi(transaksi, n)
 	fmt.Println("Data diurutkan berdasarkan total (terbesar dulu).")
 	TampilTransaksi(transaksi, n)
 }
@@ -684,6 +761,164 @@ func TampilTransaksi(transaksi *TabTransaksi, n int) {
 			"| Pel:", transaksi[i].idPelanggan,
 			"|", transaksi[i].namaBarang, "x", transaksi[i].jumlah,
 			"| Total: Rp", transaksi[i].total)
+	}
+	fmt.Println("---------------------------------")
+}
+
+// =========================================================
+// MENU LAPORAN
+// =========================================================
+func MenuLaporan(barang *TabBarang, nBarang int, pengguna *TabPengguna, nPengguna int, transaksi *TabTransaksi, nTransaksi int) {
+	var opsi int
+	for opsi != 5 {
+		fmt.Println("---------------------------------")
+		fmt.Println("       Laporan Transaksi       ")
+		fmt.Println("---------------------------------")
+		fmt.Println("1. Ringkasan Pendapatan")
+		fmt.Println("2. Laporan Per Pelanggan")
+		fmt.Println("3. Laporan Per Spare Part")
+		fmt.Println("4. Riwayat Transaksi Pelanggan")
+		fmt.Println("5. Kembali")
+		fmt.Println("---------------------------------")
+		fmt.Print("Pilihan: ")
+		fmt.Scan(&opsi)
+
+		if opsi == 1 {
+			LaporanRingkasan(transaksi, nTransaksi)
+		} else if opsi == 2 {
+			LaporanPerPelanggan(transaksi, nTransaksi, pengguna, nPengguna)
+		} else if opsi == 3 {
+			LaporanPerBarang(transaksi, nTransaksi, barang, nBarang)
+		} else if opsi == 4 {
+			LaporanRiwayatPelanggan(transaksi, nTransaksi, pengguna, nPengguna)
+		} else if opsi == 5 {
+			fmt.Println("Kembali ke Menu Utama.")
+		} else {
+			fmt.Println("Pilihan Tidak Valid")
+		}
+	}
+}
+
+func LaporanRingkasan(t *TabTransaksi, n int) {
+	if n == 0 {
+		fmt.Println("Belum ada transaksi.")
+		return
+	}
+	total := 0
+	totalItem := 0
+	idxMax, idxMin := 0, 0
+	for i := 0; i < n; i++ {
+		total += t[i].total
+		totalItem += t[i].jumlah
+		if t[i].total > t[idxMax].total {
+			idxMax = i
+		}
+		if t[i].total < t[idxMin].total {
+			idxMin = i
+		}
+	}
+	fmt.Println("---------------------------------")
+	fmt.Println("        Ringkasan Penjualan       ")
+	fmt.Println("---------------------------------")
+	fmt.Println("Jumlah Transaksi   :", n)
+	fmt.Println("Total Item Terjual :", totalItem)
+	fmt.Println("Total Pendapatan   : Rp", total)
+	fmt.Println("Rata-rata per Trans: Rp", total/n)
+	fmt.Println("Transaksi Tertinggi: Rp", t[idxMax].total, "(", t[idxMax].idTransaksi, "-", t[idxMax].namaBarang, ")")
+	fmt.Println("Transaksi Terendah : Rp", t[idxMin].total, "(", t[idxMin].idTransaksi, "-", t[idxMin].namaBarang, ")")
+	fmt.Println("---------------------------------")
+}
+
+func LaporanPerPelanggan(t *TabTransaksi, nT int, p *TabPengguna, nP int) {
+	if nT == 0 {
+		fmt.Println("Belum ada transaksi.")
+		return
+	}
+	fmt.Println("---------------------------------")
+	fmt.Println("      Laporan Per Pelanggan      ")
+	fmt.Println("---------------------------------")
+	ada := false
+	for i := 0; i < nP; i++ {
+		jumlahTrans := 0
+		totalBelanja := 0
+		for j := 0; j < nT; j++ {
+			if t[j].idPelanggan == p[i].idPengguna {
+				jumlahTrans++
+				totalBelanja += t[j].total
+			}
+		}
+		if jumlahTrans > 0 {
+			fmt.Println(p[i].idPengguna, "-", p[i].nama, ":", jumlahTrans, "transaksi, total Rp", totalBelanja)
+			ada = true
+		}
+	}
+	if !ada {
+		fmt.Println("Belum ada pelanggan dengan transaksi.")
+	}
+	fmt.Println("---------------------------------")
+}
+
+func LaporanPerBarang(t *TabTransaksi, nT int, b *TabBarang, nB int) {
+	if nT == 0 {
+		fmt.Println("Belum ada transaksi.")
+		return
+	}
+	fmt.Println("---------------------------------")
+	fmt.Println("     Laporan Per Spare Part     ")
+	fmt.Println("---------------------------------")
+	ada := false
+	for i := 0; i < nB; i++ {
+		totalJual := 0
+		totalRevenue := 0
+		for j := 0; j < nT; j++ {
+			if t[j].namaBarang == b[i].sparePart {
+				totalJual += t[j].jumlah
+				totalRevenue += t[j].total
+			}
+		}
+		if totalJual > 0 {
+			fmt.Println(b[i].sparePart, ": terjual", totalJual, "unit, revenue Rp", totalRevenue)
+			ada = true
+		}
+	}
+	if !ada {
+		fmt.Println("Belum ada spare part yang terjual.")
+	}
+	fmt.Println("---------------------------------")
+}
+
+func LaporanRiwayatPelanggan(t *TabTransaksi, nT int, p *TabPengguna, nP int) {
+	if nP == 0 {
+		fmt.Println("Belum ada pelanggan.")
+		return
+	}
+	TampilPengguna(p, nP)
+	var id string
+	fmt.Print("ID Pelanggan: ")
+	fmt.Scan(&id)
+	idx := CariIndexPengguna(p, nP, id)
+	if idx == -1 {
+		fmt.Println("Pelanggan tidak terdaftar.")
+		return
+	}
+	fmt.Println("---------------------------------")
+	fmt.Println("Riwayat", p[idx].idPengguna, "-", p[idx].nama, ":")
+	fmt.Println("---------------------------------")
+	total := 0
+	count := 0
+	for i := 0; i < nT; i++ {
+		if t[i].idPelanggan == id {
+			fmt.Println(" ", t[i].idTransaksi, "|", t[i].namaBarang, "x", t[i].jumlah, "| Rp", t[i].total)
+			total += t[i].total
+			count++
+		}
+	}
+	if count == 0 {
+		fmt.Println("  (belum ada transaksi)")
+	} else {
+		fmt.Println("---------------------------------")
+		fmt.Println("Jumlah Transaksi:", count)
+		fmt.Println("Total Belanja   : Rp", total)
 	}
 	fmt.Println("---------------------------------")
 }
@@ -707,4 +942,172 @@ func CariIndexPengguna(pengguna *TabPengguna, n int, id string) int {
 		}
 	}
 	return -1
+}
+
+// =========================================================
+// FILE PERSISTENCE (TSV di folder data/)
+// =========================================================
+func ensureDataDir() {
+	os.MkdirAll(DATA_DIR, 0755)
+}
+
+func SaveUsers(regist *TabRegist, n int) {
+	ensureDataDir()
+	f, err := os.Create(DATA_DIR + "/users.txt")
+	if err != nil {
+		fmt.Println("Gagal simpan users:", err)
+		return
+	}
+	defer f.Close()
+	w := bufio.NewWriter(f)
+	for i := 0; i < n; i++ {
+		fmt.Fprintf(w, "%s\t%s\t%s\n", regist[i].username, regist[i].email, regist[i].password)
+	}
+	w.Flush()
+}
+
+func LoadUsers(regist *TabRegist) int {
+	f, err := os.Open(DATA_DIR + "/users.txt")
+	if err != nil {
+		return 0
+	}
+	defer f.Close()
+	s := bufio.NewScanner(f)
+	n := 0
+	for s.Scan() && n < NMAX {
+		parts := strings.Split(s.Text(), "\t")
+		if len(parts) < 3 {
+			continue
+		}
+		regist[n] = registration{
+			username:    parts[0],
+			email:       parts[1],
+			password:    parts[2],
+			confirmPass: parts[2],
+		}
+		n++
+	}
+	return n
+}
+
+func SaveBarang(barang *TabBarang, n int) {
+	ensureDataDir()
+	f, err := os.Create(DATA_DIR + "/barang.txt")
+	if err != nil {
+		fmt.Println("Gagal simpan barang:", err)
+		return
+	}
+	defer f.Close()
+	w := bufio.NewWriter(f)
+	for i := 0; i < n; i++ {
+		fmt.Fprintf(w, "%s\t%d\n", barang[i].sparePart, barang[i].harga)
+	}
+	w.Flush()
+}
+
+func LoadBarang(barang *TabBarang) int {
+	f, err := os.Open(DATA_DIR + "/barang.txt")
+	if err != nil {
+		return 0
+	}
+	defer f.Close()
+	s := bufio.NewScanner(f)
+	n := 0
+	for s.Scan() && n < NMAX {
+		parts := strings.Split(s.Text(), "\t")
+		if len(parts) < 2 {
+			continue
+		}
+		harga, err := strconv.Atoi(parts[1])
+		if err != nil {
+			continue
+		}
+		barang[n].sparePart = parts[0]
+		barang[n].harga = harga
+		n++
+	}
+	return n
+}
+
+func SavePengguna(pengguna *TabPengguna, n int) {
+	ensureDataDir()
+	f, err := os.Create(DATA_DIR + "/pelanggan.txt")
+	if err != nil {
+		fmt.Println("Gagal simpan pelanggan:", err)
+		return
+	}
+	defer f.Close()
+	w := bufio.NewWriter(f)
+	for i := 0; i < n; i++ {
+		fmt.Fprintf(w, "%s\t%s\n", pengguna[i].idPengguna, pengguna[i].nama)
+	}
+	w.Flush()
+}
+
+func LoadPengguna(pengguna *TabPengguna) int {
+	f, err := os.Open(DATA_DIR + "/pelanggan.txt")
+	if err != nil {
+		return 0
+	}
+	defer f.Close()
+	s := bufio.NewScanner(f)
+	n := 0
+	for s.Scan() && n < NMAX {
+		parts := strings.Split(s.Text(), "\t")
+		if len(parts) < 2 {
+			continue
+		}
+		pengguna[n].idPengguna = parts[0]
+		pengguna[n].nama = parts[1]
+		n++
+	}
+	return n
+}
+
+func SaveTransaksi(transaksi *TabTransaksi, n int) {
+	ensureDataDir()
+	f, err := os.Create(DATA_DIR + "/transaksi.txt")
+	if err != nil {
+		fmt.Println("Gagal simpan transaksi:", err)
+		return
+	}
+	defer f.Close()
+	w := bufio.NewWriter(f)
+	for i := 0; i < n; i++ {
+		fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%d\n",
+			transaksi[i].idTransaksi,
+			transaksi[i].idPelanggan,
+			transaksi[i].namaBarang,
+			transaksi[i].jumlah,
+			transaksi[i].total)
+	}
+	w.Flush()
+}
+
+func LoadTransaksi(transaksi *TabTransaksi) int {
+	f, err := os.Open(DATA_DIR + "/transaksi.txt")
+	if err != nil {
+		return 0
+	}
+	defer f.Close()
+	s := bufio.NewScanner(f)
+	n := 0
+	for s.Scan() && n < NMAX {
+		parts := strings.Split(s.Text(), "\t")
+		if len(parts) < 5 {
+			continue
+		}
+		jumlah, err1 := strconv.Atoi(parts[3])
+		total, err2 := strconv.Atoi(parts[4])
+		if err1 != nil || err2 != nil {
+			continue
+		}
+		transaksi[n].idTransaksi = parts[0]
+		transaksi[n].idPelanggan = parts[1]
+		transaksi[n].namaBarang = parts[2]
+		transaksi[n].jumlah = jumlah
+		transaksi[n].total = total
+		n++
+	}
+	return n
 }
